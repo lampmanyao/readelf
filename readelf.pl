@@ -4,19 +4,38 @@
 # Read ELF in perl.
 #
 # TODOs:
-#  - Parse symbols table
+#  - Display symbol name of .symtab section
+#  - Parse .dynstr section
+#  - Parse .relo section
 #  - Support 32-bit OS
 #  - Only support Linux for now, support others
 
 use warnings;
 use strict;
 use autodie;
+use Getopt::Long;
 
-if (scalar @ARGV != 1) {
-	die "Usage: ./readelf.pl file\n";
+Getopt::Long::Configure("bundling");
+
+sub usage {
+	print "Usage: perl readelf.pl options elf-file\n";
+	print " Display information about the contents of ELF format files\n";
+	print " Opotions are:\n";
+	print "  -a            Display all informations\n";
+	print "  -h            Display the ELF file header\n";
+	print "  -H            Display this information\n";
+	print "  -v            Display the version number of readelf.pl\n";
 }
 
-my $in = shift;
+sub version {
+	print "readelf in perl 0.0.1\n";
+	print "Copyright (C) Lampman Yao\n";
+}
+
+my %options = ();
+GetOptions(\%options, 'H', 'a', 'v', 'h');
+
+my $in = pop (@ARGV);
 
 my ($ei_mag0, $ei_mag1, $ei_mag2, $ei_mag3, $ei_class, $ei_data, $ei_version, $ei_osabi, $e_type, $e_machine, $e_version);
 my ($e_entry, $e_phoff, $e_shoff, $e_flags, $e_ehsize, $e_phentsize, $e_phnum, $e_shentsize, $e_shnum, $e_shstrndx);
@@ -80,6 +99,7 @@ sub elf_header_parser {
 	} elsif ($ei_data == 2) {
 		print "big-endian\n";
 	}
+
 	print "ELF header version: $ei_version\n";
 	print "OS ABI: $os_abis{$ei_osabi}\n";
 	print "Type: $filetyps[$e_type]\n";
@@ -89,24 +109,25 @@ sub elf_header_parser {
 	if ($ei_class == 1) {
 		read $fh, $bytes, 0x0c;
 		($e_entry, $e_phoff, $e_shoff) = unpack("I I I", $bytes);
-		printf "Entry point: 0x%x\n", $e_entry;
+		printf "Entry point address: 0x%x\n", $e_entry;
 		printf "Start of program header table: 0x%x\n", $e_phoff;
+		printf "Start of section header: 0x%x\n", $e_shoff;
 	} elsif ($ei_class == 2) {
 		read $fh, $bytes, 0x18;
 		($e_entry, $e_phoff, $e_shoff) = unpack("q q q", $bytes);
-		printf "Entry point: 0x%x\n", $e_entry;
-		printf "Start of program header table: 0x%x\n", $e_phoff;
+		printf "Entry point address: 0x%x\n", $e_entry;
+		printf "Start of program header: 0x%x\n", $e_phoff;
+		printf "Start of section header: 0x%x\n", $e_shoff;
 	}
 
 	read $fh, $bytes, 0x10;
 	($e_flags, $e_ehsize, $e_phentsize, $e_phnum, $e_shentsize, $e_shnum, $e_shstrndx) = unpack("I S S S S S S", $bytes);
-	print "Header size: $e_ehsize\n";
-	print "Size of a program header table entry: $e_phentsize\n";
-	print "Number of entries in the program header table: $e_phnum\n";
-	print "Size of a section header table entry: $e_shentsize\n";
-	print "Number of entries in the section header table: $e_shnum\n";
-	print "Index of the section header table entry that contains the section names: $e_shstrndx\n";
-	print "\n";
+	print "Size of this header: $e_ehsize\n";
+	print "Size of program headers: $e_phentsize\n";
+	print "Number of program headers: $e_phnum\n";
+	print "Size of section headers: $e_shentsize\n";
+	print "Number of section headers: $e_shnum\n";
+	print "Section header string table index: $e_shstrndx\n";
 }
 
 my %prom_type_hash = (
@@ -127,11 +148,11 @@ my %prom_type_hash = (
 );
 
 my %pflags = (
-	1 => '  E',
-	2 => ' W',
-	3 => ' WE',
+	1 => 'E',
+	2 => 'W',
+	3 => 'WE',
 	4 => 'R',
-	5 => 'R E',
+	5 => 'RE',
 	6 => 'RW'
 );
 
@@ -139,50 +160,16 @@ sub program_header_parser {
 	print "There are $e_phnum program headers, start at offset $e_phoff\n";
 	print "Program headers:\n";
 	seek $fh, $e_phoff, "SEEK_SET";
-	print "  Type          Flags        Offset        VirtAddr        PhysAddr        FileSize        MemSize        Align\n";
+	print "        Type    Flags   Offset    VirtAddr  PhysAddr  FileSize  MemSize   Align\n";
 	for (my $i = 0; $i < $e_phnum; $i++) {
 		my $bytes;
 		read $fh, $bytes, $e_phentsize;
 		my ($p_type, $p_flags, $p_offset, $p_vaddr, $p_paddr, $p_filesz, $p_memsz, $p_align) = unpack("I I q q q q q q", $bytes);
 		if (exists $prom_type_hash{$p_type}) {
-			print "  $prom_type_hash{$p_type}";
-			for (my $j = 0; $j < length("Type") + 10 - length($prom_type_hash{$p_type}); $j++) {
-				print " ";
-			}
-
-			print "$pflags{$p_flags}";
-			for (my $j = 0; $j < length("Flags") + 8 - length($pflags{$p_flags}); $j++) {
-				print " ";
-			}
-
-			printf "0x%x", $p_offset;
-			for (my $j = 0; $j < length("Offset") + 8 - length(sprintf("0x%x", $p_offset)); $j++) {
-				print " ";
-			}
-
-			printf "0x%x", $p_vaddr;
-			for (my $j = 0; $j < length("VirtAddr") + 8 - length(sprintf("0x%x", $p_vaddr)); $j++) {
-				print " ";
-			}
-
-			printf "0x%x", $p_paddr;
-			for (my $j = 0; $j < length("PhysAddr") + 8 - length(sprintf("0x%x", $p_paddr)); $j++) {
-				print " ";
-			}
-
-			printf "0x%x", $p_filesz;
-			for (my $j = 0; $j < length("FileSize") + 8 - length(sprintf("0x%x", $p_filesz)); $j++) {
-				print " ";
-			}
-
-			printf "0x%x", $p_memsz;
-			for (my $j = 0; $j < length("MemSize") + 8 - length(sprintf("0x%x", $p_memsz)); $j++) {
-				print " ";
-			}
-			printf "0x%x\n", $p_align;
+			printf "% 12s   % 6s   0x%06x  0x%06x  0x%06x  0x%06x  0x%06x  0x%0x\n",
+				$prom_type_hash{$p_type}, $pflags{$p_flags}, $p_offset, $p_vaddr, $p_paddr, $p_filesz, $p_memsz, $p_align;
 		}
 	}
-	print "\n";
 }
 
 my %sh_types_hash = (
@@ -300,10 +287,9 @@ my %sh_flags_hash = (
 	0x10000000 => 'l'
 );
 
-sub get_name {
+sub sec_name {
 	my $idx = shift;
 	my $str = shift;
-	my $strlen = length($str);
 	my $s = substr $str, $idx;
 	my $char = "\0";
 	my $pos = index($s, $char);
@@ -320,6 +306,8 @@ sub section_header_parser {
 
 	my $symtab_offset;
 	my $symtab_size;
+	my $syment_size;
+
 	my @strtabs;
 	my $strtab_idx = 0;
 
@@ -340,11 +328,13 @@ sub section_header_parser {
 		$sections{$sh_name}{'sh_addralign'} = $sh_addralign;
 		$sections{$sh_name}{'sh_entsize'} = $sh_entsize;
 
-		# symbol table
 		if ($sh_type == 2) {
+			# symbol table
 			$symtab_offset = $sh_offset;
 			$symtab_size = $sh_size;
+			$syment_size = $sh_entsize;
 		} elsif ($sh_type == 3) {
+			# string table
 			my $curr_file_offset = tell $fh;
 			seek $fh, $sh_offset, "SEEK_SET";
 			read $fh, $strtabs[$strtab_idx], $sh_size;
@@ -360,73 +350,90 @@ sub section_header_parser {
 		}
 	}
 
-	print "[Nr]    Name                Type        Address        Offset        Size        EntSize        Flags    Link    Info    Align\n";
+	print " [Nr]                  Name           Type   Address    Offset     Size       EntSize   Flags  Link  Info  Align\n";
 	my $i = 0;
 	foreach my $key (sort {$a <=> $b} keys %sections) {
-		print "[$i]";
-		for (my $j = 0; $j < length("[Nr]") + 4 - length(sprintf("[%d]", $i)); $j++) {
-			print " ";
-		}
-
-		my $name = get_name($sections{$key}{'sh_name'}, $strtable);
-		print "$name";
-		for (my $j = 0; $j < length("Name") + 16 - length($name); $j++) {
-			print " ";
-		}
-
-		print "$sections{$key}{'sh_type'}";
-		for (my $j = 0; $j < length("Type") + 8 - length($sections{$key}{'sh_type'}); $j++) {
-			print " ";
-		}
-
-		printf "0x%x", $sections{$key}{'sh_addr'};
-		for (my $j = 0; $j < length("Address") + 8 - length(sprintf("0x%x", $sections{$key}{'sh_addr'})); $j++) {
-			print " ";
-		}
-
-		printf "0x%x", $sections{$key}{'sh_offset'};
-		for (my $j = 0; $j < length("Offset") + 8 - length(sprintf("0x%x", $sections{$key}{'sh_offset'})); $j++) {
-			print " ";
-		}
-
-		printf "0x%x", $sections{$key}{'sh_size'};
-		for (my $j = 0; $j < length("Size") + 8 - length(sprintf("0x%x", $sections{$key}{'sh_size'})); $j++) {
-			print " ";
-		}
-
-		printf "0x%x", $sections{$key}{'sh_entsize'};
-		for (my $j = 0; $j < length("EntSize") + 8 - length(sprintf("0x%x", $sections{$key}{'sh_entsize'})); $j++) {
-			print " ";
-		}
-
-		print "$sections{$key}{'sh_flags'}";
-		for (my $j = 0; $j < length("Flags") + 4 - length($sections{$key}{'sh_flags'}); $j++) {
-			print " ";
-		}
-
-		print "$sections{$key}{'sh_link'}";
-		for (my $j = 0; $j < length("Link") + 4 - length($sections{$key}{'sh_link'}); $j++) {
-			print " ";
-		}
-
-		print "$sections{$key}{'sh_info'}";
-		for (my $j = 0; $j < length("Info") + 4 - length($sections{$key}{'sh_info'}); $j++) {
-			print " ";
-		}
-
-		print "$sections{$key}{'sh_addralign'}\n";
+		my $name = sec_name($sections{$key}{'sh_name'}, $strtable);
+		printf "[%03d] %21s   %12s   0x%06x   0x%06x   0x%06x   0x%06x   %4s  %4d  %4d   %4d\n",
+			$i, $name,
+			$sections{$key}{'sh_type'},
+			$sections{$key}{'sh_addr'},
+			$sections{$key}{'sh_offset'},
+			$sections{$key}{'sh_size'},
+			$sections{$key}{'sh_entsize'},
+			$sections{$key}{'sh_flags'},
+			$sections{$key}{'sh_link'},
+			$sections{$key}{'sh_info'},
+			$sections{$key}{'sh_addralign'};
 		$i++;
 	}
 
-	#print "\n---- handle symbol table ----\n";
-	#seek $fh, $symtab_offset, "SEEK_SET";
-	#read $fh, my $symtab_, $symtab_size;
-	#print "$symtab_\n";
+	my %stt_hash = (
+		0 => 'NOTYPE',
+		1 => 'OBJECT',
+		2 => 'FUNC',
+		3 => 'SECTION',
+		4 => 'FILE'
+	);
+
+	my %stb_hash = (
+		0 => 'LOCAL',
+		1 => 'GLOBAL',
+		2 => 'WEAK',
+		10 => 'LOOS',
+		12 => 'HIOS',
+		13 => 'LOPROC',
+		15 => 'HIPROC'
+	);
+
+	my $entry_num = $symtab_size / $syment_size;
+	print "\n";
+	print "Symbol table '.symtab' contains $entry_num entries:\n";
+	print "Value     Size      Type     Bind    Ndx   Name\n";
+	my $curr_file_offset = tell $fh;
+	seek $fh, $symtab_offset, "SEEK_SET";
+	for (my $i = 0; $i < $entry_num; $i++) {
+		read $fh, my $sym_entry, $syment_size;
+		my ($st_name, $st_info, $st_other, $st_shndx, $st_value, $st_size) = unpack("I C C S q q", $sym_entry);
+		my $bind = ($st_info & 0xf0) >> 4;  # high-order four bits
+		my $type = $st_info & 0x0f;         # low-order four bits
+		my $Ndx = '';
+		if ($st_shndx == 0) {
+			$Ndx = 'UND';
+		} elsif ($st_shndx > $entry_num) {
+			$Ndx = "ABS";
+		} else {
+			$Ndx = $st_shndx;
+		}
+		printf "%06x    %4d   %7s   %6s   %4s   %4d\n", $st_value, $st_size, $stt_hash{$type}, $stb_hash{$bind}, $Ndx, $st_name;
+	}
+	seek $fh, $curr_file_offset, "SEEK_SET";
 }
 
-elf_header_parser();
-program_header_parser();
-section_header_parser();
 
-close $fh;
+if ($options{'H'}) {
+	usage();
+	exit 0;
+}
+
+if ($options{'v'}) {
+	version();
+	exit 0;
+}
+
+if ($options{'a'}) {
+	elf_header_parser();
+	print "\n";
+	program_header_parser();
+	print "\n";
+	section_header_parser();
+	close $fh;
+	exit 0;
+}
+
+if ($options{'h'}) {
+	elf_header_parser();
+	close $fh;
+	exit 0;
+}
 
