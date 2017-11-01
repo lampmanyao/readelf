@@ -160,14 +160,14 @@ sub program_header_parser {
 	print "There are $e_phnum program headers, start at offset $e_phoff\n";
 	print "Program headers:\n";
 	seek $fh, $e_phoff, "SEEK_SET";
-	print "        Type    Flags   Offset    VirtAddr  PhysAddr  FileSize  MemSize   Align\n";
+	print " Type           Offset    VirtAddr  PhysAddr  FileSize  MemSize   Flags   Align\n";
 	for (my $i = 0; $i < $e_phnum; $i++) {
 		my $bytes;
 		read $fh, $bytes, $e_phentsize;
 		my ($p_type, $p_flags, $p_offset, $p_vaddr, $p_paddr, $p_filesz, $p_memsz, $p_align) = unpack("I I q q q q q q", $bytes);
 		if (exists $prom_type_hash{$p_type}) {
-			printf "% 12s   % 6s   0x%06x  0x%06x  0x%06x  0x%06x  0x%06x  0x%0x\n",
-				$prom_type_hash{$p_type}, $pflags{$p_flags}, $p_offset, $p_vaddr, $p_paddr, $p_filesz, $p_memsz, $p_align;
+			printf " %-12s   0x%06x  0x%06x  0x%06x  0x%06x  0x%06x  %-6s  0x%-0x\n",
+				$prom_type_hash{$p_type}, $p_offset, $p_vaddr, $p_paddr, $p_filesz, $p_memsz, $pflags{$p_flags}, $p_align;
 		}
 	}
 }
@@ -350,11 +350,11 @@ sub section_header_parser {
 		}
 	}
 
-	print " [Nr]                  Name           Type   Address    Offset     Size       EntSize   Flags  Link  Info  Align\n";
+	print " [Nr]  Name                Type          Address    Offset     Size       EntSize    Flags  Link  Info  Align\n";
 	my $i = 0;
 	foreach my $key (sort {$a <=> $b} keys %sections) {
 		my $name = sec_name($sections{$key}{'sh_name'}, $strtable);
-		printf "[%03d] %21s   %12s   0x%06x   0x%06x   0x%06x   0x%06x   %4s  %4d  %4d   %4d\n",
+		printf "[%03d] %-20s %-12s  0x%06x   0x%06x   0x%06x   0x%06x   %-4s   %-4d  %-4d  %-4d\n",
 			$i, $name,
 			$sections{$key}{'sh_type'},
 			$sections{$key}{'sh_addr'},
@@ -389,7 +389,7 @@ sub section_header_parser {
 	my $entry_num = $symtab_size / $syment_size;
 	print "\n";
 	print "Symbol table '.symtab' contains $entry_num entries:\n";
-	print "Value     Size      Type     Bind    Ndx   Name\n";
+	print "Value      Size   Type      Bind    Ndx    Name\n";
 	my $curr_file_offset = tell $fh;
 	seek $fh, $symtab_offset, "SEEK_SET";
 	for (my $i = 0; $i < $entry_num; $i++) {
@@ -405,7 +405,7 @@ sub section_header_parser {
 		} else {
 			$Ndx = $st_shndx;
 		}
-		printf "%06x    %4d   %7s   %6s   %4s   %4d\n", $st_value, $st_size, $stt_hash{$type}, $stb_hash{$bind}, $Ndx, $st_name;
+		printf "0x%06x   %-4d   %-7s  %-6s   %-4s   %-4d\n", $st_value, $st_size, $stt_hash{$type}, $stb_hash{$bind}, $Ndx, $st_name;
 	}
 	seek $fh, $curr_file_offset, "SEEK_SET";
 }
