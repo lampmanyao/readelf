@@ -4,8 +4,6 @@
 # Read ELF in perl.
 #
 # TODOs:
-#  - Display symbol name of .symtab section
-#  - Parse .dynstr section
 #  - Parse .relo section
 #  - Support 32-bit OS
 #  - Only support Linux for now, support others
@@ -14,31 +12,7 @@ use warnings;
 use strict;
 use autodie;
 use Getopt::Long;
-
 Getopt::Long::Configure("bundling");
-
-sub usage {
-	print "Usage: perl readelf.pl options elf-file\n";
-	print " Display information about the contents of ELF format files\n";
-	print " Opotions are:\n";
-	print "  -a            Display all informations\n";
-	print "  -h            Display the ELF file header\n";
-	print "  -H            Display this information\n";
-	print "  -v            Display the version number of readelf.pl\n";
-}
-
-sub version {
-	print "readelf in perl 0.0.1\n";
-	print "Copyright (C) Lampman Yao\n";
-}
-
-my %options = ();
-GetOptions(\%options, 'H', 'a', 'v', 'h');
-
-my $in = pop (@ARGV);
-
-my ($ei_mag0, $ei_mag1, $ei_mag2, $ei_mag3, $ei_class, $ei_data, $ei_version, $ei_osabi, $e_type, $e_machine, $e_version);
-my ($e_entry, $e_phoff, $e_shoff, $e_flags, $e_ehsize, $e_phentsize, $e_phnum, $e_shentsize, $e_shnum, $e_shstrndx);
 
 my %os_abis = (
 	0x00 => 'System V',
@@ -77,60 +51,8 @@ my %machines = (
 	0xB7 => 'AArch64',
 	0xF3 => 'RISC-Vn'
 );
-	
-open my $fh, '<:raw', "$in";
 
-sub elf_header_parser {
-	read $fh, my $bytes, 0x18;
-	($ei_mag0, $ei_mag1, $ei_mag2, $ei_mag3, $ei_class, $ei_data, $ei_version,
-		$ei_osabi, $e_type, $e_machine, $e_version) = unpack("C a a a C C C C x8 S S I", $bytes);
-
-	if ($ei_mag0 != 127 && $ei_mag1 !~ "E" and $ei_mag2 !~ "L" && $ei_mag3 !~ "F") {
-		die "not elf file\n";
-	}
-	print "File format: ELF ";
-	if ($ei_class == 1) {
-		print "32-bit ";
-	} elsif ($ei_class == 2) {
-		print "64-bit ";
-	}
-	if ($ei_data == 1) {
-		print "little-endian\n";
-	} elsif ($ei_data == 2) {
-		print "big-endian\n";
-	}
-
-	print "ELF header version: $ei_version\n";
-	print "OS ABI: $os_abis{$ei_osabi}\n";
-	print "Type: $filetyps[$e_type]\n";
-	print "Machine: $machines{$e_machine}\n";
-	print "File Version: $e_version\n";
-
-	if ($ei_class == 1) {
-		read $fh, $bytes, 0x0c;
-		($e_entry, $e_phoff, $e_shoff) = unpack("I I I", $bytes);
-		printf "Entry point address: 0x%x\n", $e_entry;
-		printf "Start of program header table: 0x%x\n", $e_phoff;
-		printf "Start of section header: 0x%x\n", $e_shoff;
-	} elsif ($ei_class == 2) {
-		read $fh, $bytes, 0x18;
-		($e_entry, $e_phoff, $e_shoff) = unpack("q q q", $bytes);
-		printf "Entry point address: 0x%x\n", $e_entry;
-		printf "Start of program header: 0x%x\n", $e_phoff;
-		printf "Start of section header: 0x%x\n", $e_shoff;
-	}
-
-	read $fh, $bytes, 0x10;
-	($e_flags, $e_ehsize, $e_phentsize, $e_phnum, $e_shentsize, $e_shnum, $e_shstrndx) = unpack("I S S S S S S", $bytes);
-	print "Size of this header: $e_ehsize\n";
-	print "Size of program headers: $e_phentsize\n";
-	print "Number of program headers: $e_phnum\n";
-	print "Size of section headers: $e_shentsize\n";
-	print "Number of section headers: $e_shnum\n";
-	print "Section header string table index: $e_shstrndx\n";
-}
-
-my %prom_type_hash = (
+my %prom_types = (
 	0x00000000 => 'NULL',
 	0x00000001 => 'LOAD',
 	0x00000002 => 'DYNAMIC',
@@ -148,31 +70,15 @@ my %prom_type_hash = (
 );
 
 my %pflags = (
-	1 => 'E',
-	2 => 'W',
-	3 => 'WE',
+	1 => '  E',
+	2 => ' W',
+	3 => ' WE',
 	4 => 'R',
-	5 => 'RE',
+	5 => 'R E',
 	6 => 'RW'
 );
 
-sub program_header_parser {
-	print "There are $e_phnum program headers, start at offset $e_phoff\n";
-	print "Program headers:\n";
-	seek $fh, $e_phoff, "SEEK_SET";
-	print " Type           Offset    VirtAddr  PhysAddr  FileSize  MemSize   Flags   Align\n";
-	for (my $i = 0; $i < $e_phnum; $i++) {
-		my $bytes;
-		read $fh, $bytes, $e_phentsize;
-		my ($p_type, $p_flags, $p_offset, $p_vaddr, $p_paddr, $p_filesz, $p_memsz, $p_align) = unpack("I I q q q q q q", $bytes);
-		if (exists $prom_type_hash{$p_type}) {
-			printf " %-12s   0x%06x  0x%06x  0x%06x  0x%06x  0x%06x  %-6s  0x%-0x\n",
-				$prom_type_hash{$p_type}, $p_offset, $p_vaddr, $p_paddr, $p_filesz, $p_memsz, $pflags{$p_flags}, $p_align;
-		}
-	}
-}
-
-my %sh_types_hash = (
+my %shtypes = (
 	0          => 'NULL',        # No associated section (inactive entry).
 	1          => 'PROGBITS',    # Program-defined contents.
 	2          => 'SYMTAB',      # Symbol table.
@@ -204,9 +110,10 @@ my %sh_types_hash = (
 	0xffffffff => 'HIUSER'          # Highest type reserved for applications.
 );
 
-my %sh_flags_hash = (
+my %shflags = (
 	# NULL
 	0x0 => '0',
+
 	# Section data should be writable during execution.
 	# SHF_WRITE
 	0x1 => 'W',,
@@ -287,6 +194,144 @@ my %sh_flags_hash = (
 	0x10000000 => 'l'
 );
 
+my %stts = (
+	0 => 'NOTYPE',
+	1 => 'OBJECT',
+	2 => 'FUNC',
+	3 => 'SECTION',
+	4 => 'FILE'
+);
+
+my %stbs = (
+	0 => 'LOCAL',
+	1 => 'GLOBAL',
+	2 => 'WEAK',
+	10 => 'LOOS',
+	12 => 'HIOS',
+	13 => 'LOPROC',
+	15 => 'HIPROC'
+);
+
+my %viss = (
+	0 => 'DEFAULT',
+	1 => 'INTERVAL',
+	2 => 'HIDDEN',
+	3 => 'PROTECTED'
+);
+
+
+my ($ei_mag0, $ei_mag1, $ei_mag2, $ei_mag3, $ei_class, $ei_data, $ei_version, $ei_osabi, $e_type, $e_machine, $e_version);
+my ($e_entry, $e_phoff, $e_shoff, $e_flags, $e_ehsize, $e_phentsize, $e_phnum, $e_shentsize, $e_shnum, $e_shstrndx);
+my %program_headers;
+my %sections;
+my %string_tbls;
+
+my %options;
+GetOptions(\%options, 'H', 'a', 'l', 'v', 'h', 's', 'S');
+my $in = pop (@ARGV);
+open my $fh, '<:raw', "$in";
+
+
+sub usage {
+	print "Usage: perl readelf.pl options elf-file\n";
+	print " Display information about the contents of ELF format files\n";
+	print " Opotions are:\n";
+	print "  -a            Display all informations\n";
+	print "  -h            Display the ELF file header\n";
+	print "  -H            Display this information\n";
+	print "  -v            Display the version number of readelf.pl\n";
+	print "  -s            Display the symbol tabl\n";
+	print "  -S            Display the sections' header\n";
+}
+
+sub version {
+	print "readelf in perl 0.0.2\n";
+	print "Copyright (C) Lampman Yao\n";
+}
+
+sub elf_header_parser {
+	read $fh, my $buff, 0x18;
+	($ei_mag0, $ei_mag1, $ei_mag2, $ei_mag3, $ei_class, $ei_data, $ei_version,
+		$ei_osabi, $e_type, $e_machine, $e_version) = unpack("C a a a C C C C x8 S S I", $buff);
+
+	if ($ei_mag0 != 127 && $ei_mag1 !~ "E" and $ei_mag2 !~ "L" && $ei_mag3 !~ "F") {
+		die "not elf file\n";
+	}
+	if ($ei_class == 1) {
+		read $fh, $buff, 0x0c;
+		($e_entry, $e_phoff, $e_shoff) = unpack("I I I", $buff);
+	} elsif ($ei_class == 2) {
+		read $fh, $buff, 0x18;
+		($e_entry, $e_phoff, $e_shoff) = unpack("q q q", $buff);	
+	}
+
+	read $fh, $buff, 0x10;
+	($e_flags, $e_ehsize, $e_phentsize, $e_phnum, $e_shentsize, $e_shnum, $e_shstrndx) = unpack("I S S S S S S", $buff);	
+}
+
+sub display_elf_header {
+	print "ELF header:\n";
+	print " File format: ELF ";
+	if ($ei_class == 1) {
+		print "32-bit ";
+	} elsif ($ei_class == 2) {
+		print "64-bit ";
+	}
+	if ($ei_data == 1) {
+		print "little-endian\n";
+	} elsif ($ei_data == 2) {
+		print "big-endian\n";
+	}
+
+	print " ELF header version: $ei_version\n";
+	print " OS ABI: $os_abis{$ei_osabi}\n";
+	print " Type: $filetyps[$e_type]\n";
+	print " Machine: $machines{$e_machine}\n";
+	print " File Version: $e_version\n";
+	printf " Entry point address: 0x%x\n", $e_entry;
+	printf " Start of program header: 0x%x\n", $e_phoff;
+	printf " Start of section header: 0x%x\n", $e_shoff;
+	print " Size of this header: $e_ehsize\n";
+	print " Size of program headers: $e_phentsize\n";
+	print " Number of program headers: $e_phnum\n";
+	print " Size of section headers: $e_shentsize\n";
+	print " Number of section headers: $e_shnum\n";
+	print " Section header string table index: $e_shstrndx\n";
+}
+
+sub program_header_tbl_parser {
+	seek $fh, $e_phoff, "SEEK_SET";	
+	for (my $i = 0; $i < $e_phnum; $i++) {
+		my $buff;
+		read $fh, $buff, $e_phentsize;
+		my ($p_type, $p_flags, $p_offset, $p_vaddr, $p_paddr, $p_filesz, $p_memsz, $p_align) = unpack("I I q q q q q q", $buff);
+		$program_headers{$i} = [$p_type, $p_flags, $p_offset, $p_vaddr, $p_paddr, $p_filesz, $p_memsz, $p_align];
+	}
+}
+
+sub display_program_header_tbl {
+	if ($e_phnum <= 0) {
+		return;
+	}
+
+	print "There are $e_phnum program headers, start at offset $e_phoff\n",
+	      "Program headers:\n",
+	      " Type           Offset    VirtAddr  PhysAddr  FileSize  MemSize   Flags   Align\n";
+	foreach my $key (sort {$a <=> $b} keys %program_headers) {
+		if (exists $prom_types{$program_headers{$key}[0]}) {
+			printf " %-12s   0x%06x  0x%06x  0x%06x  0x%06x  0x%06x  %-6s  0x%-0x\n",
+				$prom_types{$program_headers{$key}[0]},
+				$program_headers{$key}[2],
+				$program_headers{$key}[3],
+				$program_headers{$key}[4],
+				$program_headers{$key}[5],
+				$program_headers{$key}[6],
+				$pflags{$program_headers{$key}[1]},
+				$program_headers{$key}[7];
+		}
+	}
+}
+
 sub sec_name {
 	my $idx = shift;
 	my $str = shift;
@@ -296,118 +341,134 @@ sub sec_name {
 	my $r = substr($s, 0, $pos);
 }
 
-sub section_header_parser {
-	printf "There are %d section headers, starting at offset 0x%x\n", $e_shnum, $e_shoff;
-	print "Section Headers:\n";
-
-	seek $fh, $e_shoff, "SEEK_SET";
-
-	my %sections;
-
-	my $symtab_offset;
-	my $symtab_size;
-	my $syment_size;
-
-	my @strtabs;
-	my $strtab_idx = 0;
+sub section_header_tbl_parser {
+	seek $fh, $e_shoff, "SEEK_SET";	
 
 	for (my $i = 0; $i < $e_shnum; $i++) {
-		my $bytes;
-		read $fh, $bytes, $e_shentsize;
+		my $buff;
+		read $fh, $buff, $e_shentsize;
 		my ($sh_name, $sh_type, $sh_flags, $sh_addr, $sh_offset, $sh_size,
-			$sh_link, $sh_info, $sh_addralign, $sh_entsize) = unpack("I I q q q q I I q q", $bytes);
+			$sh_link, $sh_info, $sh_addralign, $sh_entsize) = unpack("I I q q q q I I q q", $buff);
 
-		$sections{$sh_name}{'sh_name'} = $sh_name;
-		$sections{$sh_name}{'sh_type'} = $sh_types_hash{$sh_type};
-		$sections{$sh_name}{'sh_flags'} = $sh_flags_hash{$sh_flags};
-		$sections{$sh_name}{'sh_addr'} = $sh_addr;
-		$sections{$sh_name}{'sh_offset'} = $sh_offset;
-		$sections{$sh_name}{'sh_size'} = $sh_size;	
-		$sections{$sh_name}{'sh_link'} = $sh_link;
-		$sections{$sh_name}{'sh_info'} = $sh_info;
-		$sections{$sh_name}{'sh_addralign'} = $sh_addralign;
-		$sections{$sh_name}{'sh_entsize'} = $sh_entsize;
+		$sections{$i}{'sh_name'}      = $sh_name;
+		$sections{$i}{'sh_type'}      = $sh_type;
+		$sections{$i}{'sh_flags'}     = $sh_flags;
+		$sections{$i}{'sh_addr'}      = $sh_addr;
+		$sections{$i}{'sh_offset'}    = $sh_offset;
+		$sections{$i}{'sh_size'}      = $sh_size;	
+		$sections{$i}{'sh_link'}      = $sh_link;
+		$sections{$i}{'sh_info'}      = $sh_info;
+		$sections{$i}{'sh_addralign'} = $sh_addralign;
+		$sections{$i}{'sh_entsize'}   = $sh_entsize;
 
-		if ($sh_type == 2) {
-			# symbol table
-			$symtab_offset = $sh_offset;
-			$symtab_size = $sh_size;
-			$syment_size = $sh_entsize;
-		} elsif ($sh_type == 3) {
-			# string table
-			my $curr_file_offset = tell $fh;
+		if ($sh_type == 3) {
+			my $curr_offset = tell $fh;
 			seek $fh, $sh_offset, "SEEK_SET";
-			read $fh, $strtabs[$strtab_idx], $sh_size;
-			seek $fh, $curr_file_offset, "SEEK_SET";
-			$strtab_idx++;
+			my $str;
+			read $fh, $str, $sh_size;
+			seek $fh, $curr_offset, "SEEK_SET";
+			$string_tbls{$sh_offset} = $str;
 		}
 	}
+}
 
-	my $strtable;
-	foreach (@strtabs) {
-		if ($_ =~ 'symtab') {
-			$strtable = $_;
-		}
-	}
+sub display_section_header_tbl {
+	printf "There are %d section headers, starting at offset 0x%x\n", $e_shnum, $e_shoff;
+	print "Section Headers:\n",
+	      "[Nr]   Name                Type          Address    Offset     Size       EntSize    Flags  Link  Info  Align\n";
 
-	print " [Nr]  Name                Type          Address    Offset     Size       EntSize    Flags  Link  Info  Align\n";
 	my $i = 0;
 	foreach my $key (sort {$a <=> $b} keys %sections) {
-		my $name = sec_name($sections{$key}{'sh_name'}, $strtable);
 		printf "[%03d] %-20s %-12s  0x%06x   0x%06x   0x%06x   0x%06x   %-4s   %-4d  %-4d  %-4d\n",
-			$i, $name,
-			$sections{$key}{'sh_type'},
+			$i,
+			sec_name($sections{$key}{'sh_name'}, $string_tbls{$sections{$e_shstrndx}{'sh_offset'}}),
+			$shtypes{$sections{$key}{'sh_type'}},
 			$sections{$key}{'sh_addr'},
 			$sections{$key}{'sh_offset'},
 			$sections{$key}{'sh_size'},
 			$sections{$key}{'sh_entsize'},
-			$sections{$key}{'sh_flags'},
+			$shflags{$sections{$key}{'sh_flags'}},
 			$sections{$key}{'sh_link'},
 			$sections{$key}{'sh_info'},
 			$sections{$key}{'sh_addralign'};
 		$i++;
 	}
 
-	my %stt_hash = (
-		0 => 'NOTYPE',
-		1 => 'OBJECT',
-		2 => 'FUNC',
-		3 => 'SECTION',
-		4 => 'FILE'
-	);
+	print "Key to Flags:\n",
+	      " W (write), A (alloc), X (execute), M (merge), S (strings), l (large)\n",
+	      " I (info), L (link order), G (group), T (TLS), E (exclude), x (unknown)\n",
+	      " O (extra OS processing required) o (OS specific), p (processor specific)\n";
+}
 
-	my %stb_hash = (
-		0 => 'LOCAL',
-		1 => 'GLOBAL',
-		2 => 'WEAK',
-		10 => 'LOOS',
-		12 => 'HIOS',
-		13 => 'LOPROC',
-		15 => 'HIPROC'
-	);
+sub display_sections {
+	foreach my $key (sort {$a <=> $b} keys %sections) {
+		if ($sections{$key}{'sh_type'} == 2) {
+			my $symtab_offset = $sections{$key}{'sh_offset'};
+			my $symtab_size   = $sections{$key}{'sh_size'};
+			my $syment_size   = $sections{$key}{'sh_entsize'};
+			my $entry_num = $symtab_size / $syment_size;
 
-	my $entry_num = $symtab_size / $syment_size;
-	print "\n";
-	print "Symbol table '.symtab' contains $entry_num entries:\n";
-	print "Value      Size   Type      Bind    Ndx    Name\n";
-	my $curr_file_offset = tell $fh;
-	seek $fh, $symtab_offset, "SEEK_SET";
-	for (my $i = 0; $i < $entry_num; $i++) {
-		read $fh, my $sym_entry, $syment_size;
-		my ($st_name, $st_info, $st_other, $st_shndx, $st_value, $st_size) = unpack("I C C S q q", $sym_entry);
-		my $bind = ($st_info & 0xf0) >> 4;  # high-order four bits
-		my $type = $st_info & 0x0f;         # low-order four bits
-		my $Ndx = '';
-		if ($st_shndx == 0) {
-			$Ndx = 'UND';
-		} elsif ($st_shndx > $entry_num) {
-			$Ndx = "ABS";
-		} else {
-			$Ndx = $st_shndx;
+			print "Symbol table '.symtab' contains $entry_num entries:\n",
+			      "Value      Size   Type     Bind    Vis        Ndx    Name\n";
+
+			my $curr_file_offset = tell $fh;
+			my $sym_entry;
+			seek $fh, $symtab_offset, "SEEK_SET";
+			for (my $i = 0; $i < $entry_num; $i++) {
+				read $fh, $sym_entry, $syment_size;
+				my ($st_name, $st_info, $st_other, $st_shndx, $st_value, $st_size) = unpack("I C C S q q", $sym_entry);
+				my $bind = ($st_info & 0xf0) >> 4;  # high-order four bits
+				my $type = $st_info & 0x0f;         # low-order four bits
+				my $Ndx = '';
+				if ($st_shndx == 0) {
+					$Ndx = 'UND';
+				} elsif ($st_shndx > $entry_num) {
+					$Ndx = "ABS";
+				} else {
+					$Ndx = $st_shndx;
+				}
+				printf "0x%06x   %-4d   %-7s  %-6s  %-9s  %-4s   %-4s\n",
+					$st_value,
+					$st_size,
+					$stts{$type},
+					$stbs{$bind},
+					$viss{$st_other},
+					$Ndx,
+					sec_name($st_name, $string_tbls{$sections{$sections{$key}{'sh_link'}}{'sh_offset'}});
+			}
+			seek $fh, $curr_file_offset, "SEEK_SET";
+			print "\n";
+		} elsif ($sections{$key}{'sh_type'} == 11) {
+			my $symtab_offset = $sections{$key}{'sh_offset'};
+			my $symtab_size   = $sections{$key}{'sh_size'};
+			my $syment_size   = $sections{$key}{'sh_entsize'};
+			my $entry_num = $symtab_size / $syment_size;
+			print "Symbol table '.dynsym' contains $entry_num entries:\n",
+			      "Value      Size   Type     Bind    Vis        Ndx    Name\n";
+			my $curr_file_offset = tell $fh;
+			my $sym_entry;
+			seek $fh, $symtab_offset, "SEEK_SET";
+			for (my $i = 0; $i < $entry_num; $i++) {
+				read $fh, $sym_entry, $syment_size;
+				my ($st_name, $st_info, $st_other, $st_shndx, $st_value, $st_size) = unpack("I C C S q q", $sym_entry);
+				my $bind = ($st_info & 0xf0) >> 4;  # high-order four bits
+				my $type = $st_info & 0x0f;         # low-order four bits
+				my $Ndx = '';
+				if ($st_shndx == 0) {
+					$Ndx = 'UND';
+				} elsif ($st_shndx > $entry_num) {
+					$Ndx = "ABS";
+				} else {
+					$Ndx = $st_shndx;
+				}
+				printf "0x%06x   %-4d   %-7s  %-6s  %-9s  %-4s   %s\n",
+					$st_value, $st_size, $stts{$type}, $stbs{$bind}, $viss{$st_other}, $Ndx,
+					sec_name($st_name, $string_tbls{$sections{$sections{$key}{'sh_link'}}{'sh_offset'}});
+			}
+			seek $fh, $curr_file_offset, "SEEK_SET";
+			print "\n";
 		}
-		printf "0x%06x   %-4d   %-7s  %-6s   %-4s   %-4d\n", $st_value, $st_size, $stt_hash{$type}, $stb_hash{$bind}, $Ndx, $st_name;
 	}
-	seek $fh, $curr_file_offset, "SEEK_SET";
 }
 
 
@@ -421,18 +482,42 @@ if ($options{'v'}) {
 	exit 0;
 }
 
+elf_header_parser();
+program_header_tbl_parser();
+section_header_tbl_parser();
+
 if ($options{'a'}) {
-	elf_header_parser();
+	display_elf_header();
 	print "\n";
-	program_header_parser();
+	display_program_header_tbl();
 	print "\n";
-	section_header_parser();
+	display_section_header_tbl();
+	print "\n";
+	display_sections();
+	close $fh;
+	exit 0;
+}
+
+if ($options{'S'}) {
+	display_section_header_tbl();
 	close $fh;
 	exit 0;
 }
 
 if ($options{'h'}) {
-	elf_header_parser();
+	display_elf_header();
+	close $fh;
+	exit 0;
+}
+
+if ($options{'l'}) {
+	display_program_header_tbl();
+	close $fh;
+	exit 0;
+}
+
+if ($options{'s'}) {
+	display_sections();
 	close $fh;
 	exit 0;
 }
